@@ -1,0 +1,18 @@
+---
+alwaysApply: true
+---
+这是一个使用 LangChain.js 和 LangGraph 开发的 AI Agent 服务
+
+运行环境是 Nodejs ，包管理工具是 npm ，语言是 TypeScript 
+
+LangChain.js 文档地址 https://docs.langchain.com/oss/javascript/langchain/overview 
+
+LangGraph 文档地址 https://docs.langchain.com/oss/javascript/langgraph/overview 
+
+使用 langgraph-cli 启动和运行项目 https://docs.langchain.com/langsmith/cli 
+
+前端使用 langChian 提供的 agent-chat-ui 开源项目  https://github.com/langchain-ai/agent-chat-ui 
+
+大模型默认使用 deepseek-chat 大模型，除非用户特别指定使用其他模型。
+
+默认使用中文回答所有内容，除非用户特别指定使用其他语言。

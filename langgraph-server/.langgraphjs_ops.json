@@ -1,0 +1,11 @@
+{
+  "assistants": {},
+  "graphs": {
+    "agent": {
+      "id": "agent",
+      "description": "Default agent",
+      "nodes": [],
+      "edges": []
+    }
+  }
+}

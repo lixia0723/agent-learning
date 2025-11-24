@@ -1,0 +1,17 @@
+# 依赖目录
+node_modules/
+
+# 构建输出目录
+dist/
+
+# 环境变量文件
+.env
+
+# 日志文件
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+# LangGraph API
+.langgraph_api

@@ -1,14 +1,34 @@
-import { StateGraph, MessagesAnnotation } from "@langchain/langgraph";
-import { callModel, routeModelOutput, toolNode } from './nodes';
+import { StateGraph, MessagesAnnotation, Annotation } from "@langchain/langgraph";
+import { callModel, routeModelOutput, toolNode, processPdf } from './nodes';
 import { tools } from './tools';
 
+// 扩展状态注解以包含PDF内容
+const GraphAnnotation = Annotation.Root({
+  ...MessagesAnnotation.spec,
+  pdfContent: Annotation<string>({
+    reducer: (x, y) => {
+      // 如果新的值存在且不为空，则使用新的值，否则保留旧值
+      if (y && y.trim().length > 0) {
+        console.log("Reducer: Using new pdfContent value, length:", y.length);
+        return y;
+      }
+      console.log("Reducer: Keeping old pdfContent value, length:", x?.length || 0);
+      return x || "";
+    },
+    default: () => ""
+  })
+});
+
 // 创建工作流
-const workflow = new StateGraph(MessagesAnnotation)
-  // 定义两个节点
+const workflow = new StateGraph(GraphAnnotation)
+  // 定义节点
+  .addNode("processPdf", processPdf)
   .addNode("callModel", callModel)
   .addNode("tools", toolNode)
-  // 设置入口点为 `callModel`
-  .addEdge("__start__", "callModel")
+  // 设置入口点为 `processPdf`
+  .addEdge("__start__", "processPdf")
+  // 从 processPdf 连接到 callModel
+  .addEdge("processPdf", "callModel")
   // 添加条件边，根据模型输出决定下一步
   .addConditionalEdges(
     "callModel",

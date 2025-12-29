@@ -1,13 +1,27 @@
 import { MessagesAnnotation } from "@langchain/langgraph";
+import { BaseMessage, HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { llm } from './model';
+import { llm, deepThinkLlm } from './model';
 import { tools } from './tools';
 import { buildSystemPrompt } from './prompt';
 
+// 定义消息类型守卫函数
+function isHumanMessage(message: BaseMessage): message is HumanMessage {
+  return message.constructor.name === 'HumanMessage' || (message as any).role === 'user';
+}
+
+function isAIMessage(message: BaseMessage): message is AIMessage {
+  return message.constructor.name === 'AIMessage' || (message as any).role === 'assistant';
+}
+
+function isSystemMessage(message: BaseMessage): message is SystemMessage {
+  return message.constructor.name === 'SystemMessage' || (message as any).role === 'system';
+}
+
 // 添加PDF处理节点
-export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfContent?: string }) => {
+export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfContent?: string | null }) => {
   console.log("=== PROCESS PDF FUNCTION ===");
-  console.log("Initial state pdfContent:", state.pdfContent ? `Length: ${state.pdfContent.length}` : "None");
+  console.log("Initial state pdfContent:", state.pdfContent === null ? "Parsing failed" : state.pdfContent ? `Length: ${state.pdfContent.length}` : "None");
   
   // 检查是否有消息以及最后一条消息是否包含内容
   if (!state.messages || state.messages.length === 0) {
@@ -24,7 +38,7 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
     });
   }
   
-  let pdfContent = ""; // 确保每次都是新的空字符串开始，不继承之前的值
+  let pdfContent: string | null = null; // 使用null表示解析失败，空字符串表示没有PDF文件
   let updatedMessages = [...state.messages];
 
   // 检查最后一条消息是否包含PDF文件
@@ -33,6 +47,7 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
     const fileContents = lastMessage.content.filter(item => item.type === "file");
     console.log("Found file contents:", fileContents.length);
     
+    let pdfParsed = false;
     for (const fileContent of fileContents) {
       // 检查是否为PDF文件
       if (fileContent.mimeType === "application/pdf") {
@@ -54,8 +69,8 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
             console.log("PDF buffer created, size:", pdfBuffer.length);
             pdfData = await pdfParse(pdfBuffer);
             console.log("Method 1 succeeded");
-          } catch (method1Error) {
-            console.log("Method 1 failed:", method1Error.message);
+          } catch (method1Error: any) {
+            console.log("Method 1 failed:", method1Error.message ?? method1Error);
             try {
               // 方法2: 使用 PDFParse 类
               console.log("Trying method 2: new PDFParse()");
@@ -65,8 +80,8 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
               pdfData = await pdfParser.parse(pdfBuffer);
               await pdfParser.destroy(); // 清理资源
               console.log("Method 2 succeeded");
-            } catch (method2Error) {
-              console.log("Method 2 failed:", method2Error.message);
+            } catch (method2Error: any) {
+              console.log("Method 2 failed:", method2Error.message ?? method2Error);
               try {
                 // 方法3: 使用带选项的 PDFParse 类
                 console.log("Trying method 3: new PDFParse({ data: buffer })");
@@ -76,8 +91,8 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
                 pdfData = await pdfParser.getText();
                 await pdfParser.destroy(); // 清理资源
                 console.log("Method 3 succeeded");
-              } catch (method3Error) {
-                console.log("Method 3 failed:", method3Error.message);
+              } catch (method3Error: any) {
+                console.log("Method 3 failed:", method3Error.message ?? method3Error);
                 console.log("All methods failed");
                 throw method3Error; // 如果所有方法都失败，则抛出最后一个错误
               }
@@ -85,20 +100,21 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
           }
           
           pdfContent = pdfData?.text || pdfData?.content || ""; // 使用赋值而不是累加，确保只保存当前PDF的内容
-          console.log("PDF successfully parsed. Text length:", pdfContent.length);
+          console.log("PDF successfully parsed. Text length:", pdfContent?.length ?? 0);
+          pdfParsed = true;
           
           // 显示前200个字符作为预览
-          if (pdfContent.length > 0) {
+          if (pdfContent && pdfContent.length > 0) {
             console.log("PDF preview:", pdfContent.substring(0, 200) + (pdfContent.length > 200 ? "..." : ""));
           }
           
           // 如果提取到内容，提前结束循环
-          if (pdfContent.length > 0) {
+          if (pdfContent && pdfContent.length > 0) {
             console.log("Successfully extracted PDF content, breaking loop");
             break;
           }
         } catch (parseError: any) {
-          console.error("Error parsing PDF:", parseError.message);
+          console.error("Error parsing PDF:", parseError.message ?? parseError);
           console.error("Stack:", parseError.stack);
         }
       } else {
@@ -106,8 +122,14 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
       }
     }
     
+    // 如果找到了PDF文件但解析失败，设置pdfContent为null
+    if (fileContents.some(item => item.mimeType === "application/pdf") && !pdfParsed) {
+      pdfContent = null;
+      console.log("PDF file found but parsing failed");
+    }
+    
     // 对PDF内容进行处理，使其看起来更像普通文本
-    if (pdfContent.length > 0) {
+    if (pdfContent && pdfContent.length > 0) {
       // 移除可能暴露PDF来源的特征文本
       pdfContent = pdfContent
         .replace(/(?:\r\n|\r|\n)/g, ' ') // 将换行符替换为空格
@@ -120,19 +142,20 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
       }
     }
     
-    // 不再修改消息内容，保持用户上传的文件信息不变
+    // 保持消息内容不变，不进行任何修改
     console.log("Keeping original messages unchanged");
     updatedMessages = [...state.messages];
   } else {
     console.log("Last message content is not an array or is empty");
+    // 没有文件内容，保持pdfContent为undefined
   }
   
   // 返回更新后的状态，包括处理后的消息和提取的PDF内容
-  console.log("Final pdfContent length:", pdfContent.length);
+  console.log("Final pdfContent:", pdfContent === null ? "Parsing failed" : pdfContent ? `Length: ${pdfContent.length}` : "No PDF file");
   console.log("Updated messages count:", updatedMessages.length);
   
   // 显示返回的pdfContent前200个字符作为预览
-  if (pdfContent.length > 0) {
+  if (pdfContent && pdfContent.length > 0) {
     console.log("Returning pdfContent preview:", pdfContent.substring(0, 200) + (pdfContent.length > 200 ? "..." : ""));
   }
   
@@ -143,35 +166,23 @@ export const processPdf = async (state: typeof MessagesAnnotation.State & { pdfC
 };
 
 // 定义调用模型的节点
-export const callModel = async (state: typeof MessagesAnnotation.State & { pdfContent?: string }) => {
+export const callModel = async (state: typeof MessagesAnnotation.State & { pdfContent?: string | null }) => {
   console.log("=== CALL MODEL FUNCTION ===");
   console.log("State messages count:", state.messages?.length || 0);
-  console.log("State pdfContent exists:", !!state.pdfContent);
-  if (state.pdfContent) {
-    console.log("State pdfContent length:", state.pdfContent.length);
-    if (state.pdfContent.length > 0) {
-      console.log("State pdfContent preview:", state.pdfContent.substring(0, 200) + (state.pdfContent.length > 200 ? "..." : ""));
-    }
-  } else {
-    console.log("State pdfContent is null or undefined");
-  }
+  console.log("State pdfContent:", state.pdfContent === null ? "Parsing failed" : state.pdfContent ? `Length: ${state.pdfContent.length}` : "No PDF file");
+  
+  // 根据是否有PDF内容决定使用哪个模型
+  const modelToUse = (state.pdfContent && state.pdfContent.length > 0) ? deepThinkLlm : llm;
+  const modelName = (state.pdfContent && state.pdfContent.length > 0) ? "deepseek-reasoner (深度思考)" : "deepseek-chat (普通对话)";
+  console.log("Using model:", modelName);
   
   // 构建系统提示
-  let systemPrompt = "你是一个专业、友好且乐于助人的 AI 功能助手。你的主要职责是：\n\n1. **理解用户需求**：仔细分析用户的问题和请求，提供准确、有用的回答\n2. **提供清晰解答**：用简洁明了的语言解释复杂概念，确保用户能够理解\n3. **处理文档内容**：当用户提供文本内容时，你需要基于这些内容回答问题，引用具体的文本来支持你的回答\n4. **保持专业态度**：始终保持礼貌、耐心和专业，即使面对复杂或重复的问题\n\n请根据用户的输入和上下文，提供最有帮助的回答。";
-  
-  // 检查并拼接内容到系统提示词中，完全隐藏PDF痕迹
-  if (state.pdfContent && typeof state.pdfContent === 'string' && state.pdfContent.trim().length > 0) {
-    const trimmedPdfContent = state.pdfContent.trim();
-    systemPrompt = `${systemPrompt}\n\n以下信息可供你参考，请基于这些内容回答用户的问题：\n\n${trimmedPdfContent}\n\n首先，你要把 PDF 内容显示给用户，让用户知道你已经获取到了 PDF 内容。请仔细阅读上述内容，并根据用户的问题提供准确、相关的回答。`;
-    console.log("Content added to system prompt, total system prompt length:", systemPrompt.length);
-    console.log("System prompt with content preview:", systemPrompt.substring(0, 500) + (systemPrompt.length > 500 ? "..." : ""));
-  } else {
-    console.log("No valid content to add to system prompt");
-  }
+  const systemPrompt = buildSystemPrompt(state.pdfContent);
+  console.log("System prompt length:", systemPrompt.length);
   
   // 过滤掉文件类型的内容，只保留文本内容发送给LLM
   const filteredMessages = state.messages.map((message, index) => {
-    console.log(`Processing message ${index}: role=${message.role}`);
+    console.log(`Processing message ${index}: type=${message.constructor.name}`);
     if (Array.isArray(message.content)) {
       console.log(`Message ${index} content items:`, message.content.length);
       // 过滤掉文件类型的内容
@@ -200,24 +211,36 @@ export const callModel = async (state: typeof MessagesAnnotation.State & { pdfCo
   
   console.log("Sending", messagesWithSystemPrompt.length, "messages to LLM");
   messagesWithSystemPrompt.forEach((msg, index) => {
+    // 使用类型守卫函数检查消息类型
+    let role = "unknown";
+    if (isHumanMessage(msg as BaseMessage)) {
+      role = "user";
+    } else if (isAIMessage(msg as BaseMessage)) {
+      role = "assistant";
+    } else if (isSystemMessage(msg as BaseMessage)) {
+      role = "system";
+    } else if ((msg as any).role) {
+      role = (msg as any).role;
+    }
+    
     if (typeof msg.content === 'string') {
-      console.log(`Message ${index}: role=${msg.role}, content length=${msg.content.length}`);
+      console.log(`Message ${index}: role=${role}, content length=${msg.content.length}`);
     } else if (Array.isArray(msg.content)) {
-      console.log(`Message ${index}: role=${msg.role}, content items=${msg.content.length}`);
+      console.log(`Message ${index}: role=${role}, content items=${msg.content.length}`);
     } else {
-      console.log(`Message ${index}: role=${msg.role}, content type=${typeof msg.content}`);
+      console.log(`Message ${index}: role=${role}, content type=${typeof msg.content}`);
     }
   });
   
   try {
-    const response = await llm.invoke(messagesWithSystemPrompt);
+    const response = await modelToUse.invoke(messagesWithSystemPrompt);
     console.log("LLM Response received");
     
     return {
       messages: [...state.messages, response]
     };
   } catch (error: any) {
-    console.error("Error calling DeepSeek LLM:", error);
+    console.error("Error calling DeepSeek LLM:", error.message ?? error);
     const errorMessage = "Sorry, I encountered an error while processing your request with DeepSeek.";
     return {
       messages: [...state.messages, { role: "assistant", content: errorMessage }]

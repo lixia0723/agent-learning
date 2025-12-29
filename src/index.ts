@@ -33,13 +33,17 @@ function greet(name: string): string {
 // 添加路由来处理 LangGraph 请求
 expressApp.post('/invoke', async (req: Request, res: Response) => {
   try {
-    const { input } = req.body;
+    const { input, threadId = "1" } = req.body;
     if (!input) {
       return res.status(400).json({ error: 'Input is required' });
     }
 
     const result = await app.invoke({
       messages: [new HumanMessage(input)]
+    }, {
+      configurable: {
+        threadId
+      }
     });
 
     res.json(result);

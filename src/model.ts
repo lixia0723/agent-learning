@@ -8,3 +8,10 @@ export const llm = new ChatDeepSeek({
   temperature: 0.7,
   apiKey: config.deepseekApiKey
 }).bindTools(tools);
+
+// 创建深度思考模型实例，用于处理复杂任务如PDF简历分析
+export const deepThinkLlm = new ChatDeepSeek({
+  modelName: "deepseek-reasoner",
+  temperature: 0.7,
+  apiKey: config.deepseekApiKey
+}).bindTools(tools);
